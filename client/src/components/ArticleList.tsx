@@ -37,6 +37,22 @@ export const ArticleList: React.FC = () => {
       })
       .catch(() => setLoading(false));
   };
+  // Новая функция для обновления через refresh
+const handleRefresh = () => {
+  setLoading(true);
+  fetch('/api/refresh', {
+    method: 'POST',
+  })
+    .then(res => res.json())
+    .then(data => {
+      console.log(data.message);
+      // После обновления парсинга — загрузить свежие статьи
+      fetchArticles(true);
+    })
+    .catch(() => {
+      setLoading(false);
+    });
+};
 
   useEffect(() => {
     setPage(1);
@@ -70,12 +86,12 @@ export const ArticleList: React.FC = () => {
               Сбросить
             </button>
           )}
-          <button
-            onClick={() => fetchArticles(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded shadow transition-all duration-200"
-          >
-            Обновить
-          </button>
+      <button
+        onClick={handleRefresh}
+        className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded shadow transition-all duration-200"
+      >
+        Обновить
+      </button>
         </div>
       </div>
       {loading && (
