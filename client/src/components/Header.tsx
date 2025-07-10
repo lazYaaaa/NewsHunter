@@ -1,5 +1,6 @@
 import React from 'react';
-import { useTheme } from '../context/context.tsx';
+import { Link } from 'wouter'; 
+import { useTheme} from '../context/context.tsx';
 
 export const Header: React.FC = () => {
   const { darkMode, toggleDarkMode } = useTheme();
@@ -8,11 +9,11 @@ export const Header: React.FC = () => {
     <header className="bg-blue-700 dark:bg-gray-900 text-white py-4 mb-6 shadow-lg transition-colors duration-300">
       <div className="container mx-auto px-4 flex justify-between items-center">
         <div className="flex items-center space-x-3">
-          
           <img src="/vite.svg" alt="Logo" className="h-8 w-8 object-contain" />
           <h1 className="text-2xl font-bold tracking-wide">NewsFlow</h1>
         </div>
         <div className="flex items-center gap-4">
+          {/* Кнопка переключения темы */}
           <button
             onClick={toggleDarkMode}
             className="p-2 rounded-full hover:bg-blue-600 dark:hover:bg-gray-700 transition-colors duration-200"
@@ -28,9 +29,26 @@ export const Header: React.FC = () => {
               </svg>
             )}
           </button>
-          <a href="/" className="bg-yellow-400 hover:bg-yellow-500 text-blue-900 font-bold py-2 px-4 rounded shadow transition-all duration-200 border-2 border-yellow-500">
+
+          {/* Навигационные ссылки для wouter */}
+          <Link
+            to="/"
+            className="bg-yellow-400 hover:bg-yellow-500 text-blue-900 font-bold py-2 px-4 rounded shadow transition-all duration-200 border-2 border-yellow-500"
+          >
             Главная
-          </a>
+          </Link>
+          <Link
+            to="/login"
+            className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded shadow transition-all duration-200"
+          >
+            Войти
+          </Link>
+          <Link
+            to="/register"
+            className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded shadow transition-all duration-200"
+          >
+            Регистрация
+          </Link>
         </div>
       </div>
     </header>

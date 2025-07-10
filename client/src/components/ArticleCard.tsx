@@ -14,7 +14,7 @@ export const ArticleCard: React.FC<ArticleCardProps> = ({ title, excerpt, url, i
     href={url}
     target="_blank"
     rel="noopener noreferrer"
-    className="block border border-gray-200 dark:border-gray-700 rounded-xl p-5 hover:shadow-2xl hover:-translate-y-1 transition-all bg-white dark:bg-gray-900 h-full group"
+    className="block border border-gray-200 dark:border-gray-700 rounded-xl p-5 hover:shadow-2xl hover:-translate-y-1 transition-all bg-cyan-50 dark:bg-gray-900 h-full group"
     style={{ minHeight: 220 }}
   >
     {imageUrl && (
