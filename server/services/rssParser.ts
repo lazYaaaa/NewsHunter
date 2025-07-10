@@ -23,7 +23,7 @@ export class RSSParser {
       const xmlText = await response.text();
       return this.parseXML(xmlText, url);
     } catch (error) {
-      console.error(`Error parsing ${url}:`, error);
+      // Ошибка при парсинге — возвращаем пустой массив
       return [];
     }
   }
@@ -65,45 +65,42 @@ export class RSSParser {
     return null;
   }
 
- private extractImage(xml: string, itemLink: string, feedUrl: string): string | undefined {
-  console.log('Parsing images in XML segment:', xml);
-  const sources = [
-    { regex: /<enclosure[^>]+url="([^"]+)"[^>]*type="image[^"]*"/i, type: 'enclosure' },
-    { regex: /<media:content[^>]+url="([^"]+)"[^>]*medium="image"/i, type: 'media' },
-    { regex: /<media:thumbnail[^>]+url="([^"]+)"/i, type: 'thumbnail' },
-    { regex: /<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i, type: 'og' },
-    { regex: /<image[^>]+href="([^"]+)"/i, type: 'image-tag' },
-    { regex: /<img[^>]+src=["']([^"']+)["']/i, type: 'html-img' },
-    { regex: /background-image:\s*url\(['"]?([^'")]+)['"]?\)/i, type: 'css-bg' },
-  ];
+  private extractImage(xml: string, itemLink: string, feedUrl: string): string | undefined {
+    // Поиск изображений через разные источники
+    const sources = [
+      { regex: /<enclosure[^>]+url="([^"]+)"[^>]*type="image[^"]*"/i, type: 'enclosure' },
+      { regex: /<media:content[^>]+url="([^"]+)"[^>]*medium="image"/i, type: 'media' },
+      { regex: /<media:thumbnail[^>]+url="([^"]+)"/i, type: 'thumbnail' },
+      { regex: /<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i, type: 'og' },
+      { regex: /<image[^>]+href="([^"]+)"/i, type: 'image-tag' },
+      { regex: /<img[^>]+src=["']([^"']+)["']/i, type: 'html-img' },
+      { regex: /background-image:\s*url\(['"]?([^'")]+)['"]?\)/i, type: 'css-bg' },
+    ];
 
-  for (const src of sources) {
-    const match = xml.match(src.regex);
-    if (match && match[1]) {
-      console.log(`Found image with regex ${src.type}:`, match[1]);
-      return this.normalizeUrl(match[1], itemLink || feedUrl);
+    for (const src of sources) {
+      const match = xml.match(src.regex);
+      if (match && match[1]) {
+        return this.normalizeUrl(match[1], itemLink || feedUrl);
+      }
     }
-  }
 
-  // Попытка извлечь изображение из содержимого description или content:encoded
-  const content = this.extractValue(xml, ['content:encoded', 'description']);
-  if (content) {
-    const imgMatch = /<img[^>]+src=["']([^"']+)["']/i.exec(content);
-    if (imgMatch && imgMatch[1]) {
-      console.log('Found image inside HTML content:', imgMatch[1]);
-      return this.normalizeUrl(imgMatch[1], itemLink || feedUrl);
+    // Попытка извлечь изображение из содержимого description или content:encoded
+    const content = this.extractValue(xml, ['content:encoded', 'description']);
+    if (content) {
+      const imgMatch = /<img[^>]+src=["']([^"']+)["']/i.exec(content);
+      if (imgMatch && imgMatch[1]) {
+        return this.normalizeUrl(imgMatch[1], itemLink || feedUrl);
+      }
     }
-  }
 
-  // Также попробуйте извлечь из <image> тега
-  const imageTagMatch = /<image[^>]*>[\s\S]*?<url>([^<]+)<\/url>/i.exec(xml);
-  if (imageTagMatch && imageTagMatch[1]) {
-    console.log('Found image inside <image> tag:', imageTagMatch[1]);
-    return this.normalizeUrl(imageTagMatch[1], itemLink || feedUrl);
-  }
+    // Попытка извлечь из <image> тега
+    const imageTagMatch = /<image[^>]*>[\s\S]*?<url>([^<]+)<\/url>/i.exec(xml);
+    if (imageTagMatch && imageTagMatch[1]) {
+      return this.normalizeUrl(imageTagMatch[1], itemLink || feedUrl);
+    }
 
-  return undefined;
-}
+    return undefined; // Изображение не найдено
+  }
 
   private normalizeUrl(url: string, baseUrl: string): string {
     try {
@@ -112,7 +109,6 @@ export class RSSParser {
       }
       return url.split('?')[0];
     } catch (e) {
-      console.warn('URL normalization failed:', url);
       return url;
     }
   }
@@ -121,7 +117,6 @@ export class RSSParser {
     const categories: string[] = [];
     const regex = /<(category|dc:subject)[^>]*>([^<]+)</gi;
     let match;
-    
     while ((match = regex.exec(xml)) !== null) {
       categories.push(match[2].trim());
     }
@@ -151,11 +146,11 @@ export class RSSParser {
     defaultCategory: string
   ): InsertArticle {
     return {
-      title: item.title.substring(0, 255), // Ограничение длины
+      title: item.title.substring(0, 255),
       content: item.description,
       excerpt: this.extractExcerpt(item.description),
-      url: item.link.substring(0, 512), // Ограничение длины URL
-      imageUrl: item.image?.substring(0, 512) || null, // Ограничение длины
+      url: item.link.substring(0, 512),
+      imageUrl: item.image?.substring(0, 512) || null,
       category: (item.categories?.[0] || defaultCategory).substring(0, 100),
       sourceId,
       sourceName: sourceName.substring(0, 100),
@@ -166,12 +161,8 @@ export class RSSParser {
   private extractExcerpt(description: string, maxLength: number = 200): string {
     const text = this.cleanText(description);
     if (text.length <= maxLength) return text;
-    
     const truncated = text.substring(0, maxLength);
     const lastSpace = truncated.lastIndexOf(' ');
-    
-    return lastSpace > 0 
-      ? truncated.substring(0, lastSpace) + '...'
-      : truncated + '...';
+    return lastSpace > 0 ? truncated.substring(0, lastSpace) + '...' : truncated + '...';
   }
 }
