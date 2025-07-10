@@ -13,8 +13,22 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import cors from 'cors';
 import { randomUUID } from 'crypto';
+import { isLocalAuthenticated } from './localAuth';
+import 'express-session';
+
+declare module 'express-session' {
+  interface SessionData {
+    userId?: string; // добавьте ваше свойство
+  }
+}
+
+interface AuthenticatedRequest extends Request {
+  user?: typeof users.$inferSelect;
+}
+
 
 const rssParser = new RSSParser();
+
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // 1. Middleware должны быть первыми
@@ -76,67 +90,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/login', async (req: Request, res: Response) => {
-    try {
-      const { email, password } = req.body;
+ app.post('/api/login', async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body;
 
-      if (!email || !password) {
-        return res.status(400).json({ 
-          success: false,
-          message: 'Email and password are required' 
-        });
-      }
-
-      const [user] = await db
-        .select()
-        .from(users)
-        .where(eq(users.email, email));
-
-      if (!user) {
-        return res.status(401).json({ 
-          success: false,
-          message: 'Invalid credentials' 
-        });
-      }
-
-      const passwordMatch = await bcrypt.compare(password, user.password);
-      if (!passwordMatch) {
-        return res.status(401).json({ 
-          success: false,
-          message: 'Invalid credentials' 
-        });
-      }
-
-      const token = jwt.sign(
-        { userId: user.id, email: user.email },
-        process.env.JWT_SECRET || 'your-secret-key',
-        { expiresIn: '1h' }
-      );
-
-      res.cookie('token', token, { 
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        maxAge: 3600000
-      });
-
-      return res.json({
-        success: true,
-        message: 'Login successful',
-        user: {
-          id: user.id,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName
-        }
-      });
-    } catch (error) {
-      console.error('Login error:', error);
-      return res.status(500).json({ 
+    // Проверка обязательных полей
+    if (!email || !password) {
+      return res.status(400).json({ 
         success: false,
-        message: 'Internal server error' 
+        message: 'Email и пароль обязательны' 
       });
     }
-  });
+
+    // Поиск пользователя по email
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, email));
+
+    if (!user) {
+      return res.status(401).json({ 
+        success: false,
+        message: 'Неверные учетные данные' 
+      });
+    }
+
+    // Проверка пароля
+    const passwordMatch = await bcrypt.compare(password, user.password);
+    if (!passwordMatch) {
+      return res.status(401).json({ 
+        success: false,
+        message: 'Неверные учетные данные' 
+      });
+    }
+
+    // Генерация JWT
+    const token = jwt.sign(
+      { userId: user.id, email: user.email },
+      process.env.JWT_SECRET || 'your-secret-key',
+      { expiresIn: '1h' }
+    );
+
+    // Установка куки с токеном
+    req.session.userId = user.id;
+await req.session.save();
+
+return res.json({
+  success: true,
+  message: 'Успешный вход',
+  user: {
+    id: user.id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName
+  }
+});
+  } catch (error) {
+    console.error('Ошибка входа:', error);
+    return res.status(500).json({ 
+      success: false,
+      message: 'Ошибка сервера' 
+    });
+  }
+});
 
   // 5. Articles endpoints
   app.get("/api/articles", async (req: Request, res: Response) => {
@@ -283,6 +299,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(500).json({ error: "Failed to refresh feeds" });
     }
   });
+app.get('/api/auth/user', isLocalAuthenticated, async (req: Request, res: Response) => {
+  const authReq = req as AuthenticatedRequest;
+  
+  if (!authReq.user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  res.json({
+    id: authReq.user.id,
+    email: authReq.user.email,
+    firstName: authReq.user.firstName,
+    lastName: authReq.user.lastName
+  });
+});
+app.post('/api/logout', (req: Request, res: Response) => {
+  // Проверяем, есть ли у пользователя сессия
+  if (req.session) {
+    // Удаляем userId из сессии
+    req.session.destroy(err => {
+      if (err) {
+        console.error('Ошибка при выходе из системы:', err);
+        return res.status(500).json({ error: 'Не удалось выйти из системы' });
+      }
+      // Можно отправить успешный ответ
+      res.json({ message: 'Вы успешно вышли' });
+    });
+  } else {
+    res.status(200).json({ message: 'Вы уже вышли' });
+  }
+});
 
   // 10. 404 handler должен быть последним
   app.all('/api/*', (req: Request, res: Response) => {

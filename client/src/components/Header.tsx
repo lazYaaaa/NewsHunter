@@ -1,9 +1,66 @@
-import React from 'react';
-import { Link } from 'wouter'; 
-import { useTheme} from '../context/context.tsx';
+import React, { useEffect, useState } from 'react';
+import { Link, useLocation } from 'wouter';
+import { useTheme } from '../context/context.tsx';
 
 export const Header: React.FC = () => {
   const { darkMode, toggleDarkMode } = useTheme();
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [user, setUser] = useState<{ firstName?: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [, setLocation] = useLocation(); // добавляем useLocation
+
+  // Проверка аутентификации при загрузке
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const response = await fetch('/api/auth/user', {
+          credentials: 'include' // Важно для отправки куков
+        });
+        
+        if (response.ok) {
+          const userData = await response.json();
+          setIsAuthenticated(true);
+          setUser(userData);
+        } else {
+          setIsAuthenticated(false);
+          setUser(null);
+        }
+      } catch (error) {
+        console.error('Auth check failed:', error);
+        setIsAuthenticated(false);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    checkAuth();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      const response = await fetch('/api/logout', {
+        method: 'POST',
+        credentials: 'include'
+      });
+      
+      if (response.ok) {
+        setIsAuthenticated(false);
+        setUser(null);
+        // Перенаправление на главную страницу после выхода
+        setLocation('/');
+      }
+    } catch (error) {
+      console.error('Logout failed:', error);
+    }
+  };
+
+  const handleProfile = () => {
+    setLocation('/profile'); // Переход на страницу профиля
+  };
+
+  if (loading) {
+    return <div className="bg-blue-700 dark:bg-gray-900 h-16"></div>; // Заглушка загрузки
+  }
 
   return (
     <header className="bg-blue-700 dark:bg-gray-900 text-white py-4 mb-6 shadow-lg transition-colors duration-300">
@@ -12,6 +69,7 @@ export const Header: React.FC = () => {
           <img src="/vite.svg" alt="Logo" className="h-8 w-8 object-contain" />
           <h1 className="text-2xl font-bold tracking-wide">NewsFlow</h1>
         </div>
+        
         <div className="flex items-center gap-4">
           {/* Кнопка переключения темы */}
           <button
@@ -30,25 +88,49 @@ export const Header: React.FC = () => {
             )}
           </button>
 
-          {/* Навигационные ссылки для wouter */}
+          {/* Главная ссылка */}
           <Link
             to="/"
             className="bg-yellow-400 hover:bg-yellow-500 text-blue-900 font-bold py-2 px-4 rounded shadow transition-all duration-200 border-2 border-yellow-500"
           >
             Главная
           </Link>
-          <Link
-            to="/login"
-            className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded shadow transition-all duration-200"
-          >
-            Войти
-          </Link>
-          <Link
-            to="/register"
-            className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded shadow transition-all duration-200"
-          >
-            Регистрация
-          </Link>
+
+          {isAuthenticated ? (
+            <>
+              {/* Кнопка профиля */}
+              <button
+                onClick={handleProfile}
+                className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded shadow transition-all duration-200"
+              >
+                {user?.firstName || 'Профиль'}
+              </button>
+              
+              {/* Кнопка выхода */}
+              <button
+                onClick={handleLogout}
+                className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded shadow transition-all duration-200"
+              >
+                Выйти
+              </button>
+            </>
+          ) : (
+            <>
+              {/* Вход и регистрация */}
+              <Link
+                to="/login"
+                className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded shadow transition-all duration-200"
+              >
+                Войти
+              </Link>
+              <Link
+                to="/register"
+                className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded shadow transition-all duration-200"
+              >
+                Регистрация
+              </Link>
+            </>
+          )}
         </div>
       </div>
     </header>

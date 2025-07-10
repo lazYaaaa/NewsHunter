@@ -3,44 +3,61 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { storage } from "./storage";
 import cors from 'cors';
+import { setupLocalAuth } from './localAuth';
+import session from "express-session";
 
-const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
-app.use(cors());
+async function main() {
+  const app = express();
 
-app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+  // 1. Middleware в правильном порядке
+  app.use(cors({
+    origin: true,
+    credentials: true
+  }));
 
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: false }));
 
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+  // 2. Инициализация аутентификации
+  app.use(session({
+  secret: 'your-secret-key', // Замените на свой секрет
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 1 неделя
+    secure: false, // true если HTTPS, иначе false
+    sameSite: 'lax' // или 'none' при необходимости
+  }
+}));
+  await setupLocalAuth(app);
+
+  // 3. Логирование запросов
+  app.use((req, res, next) => {
+    const start = Date.now();
+    const path = req.path;
+    let capturedJsonResponse: Record<string, any> | undefined = undefined;
+
+    const originalResJson = res.json;
+    res.json = function (bodyJson, ...args) {
+      capturedJsonResponse = bodyJson;
+      return originalResJson.apply(res, [bodyJson, ...args]);
+    };
+
+    res.on("finish", () => {
+      const duration = Date.now() - start;
+      if (path.startsWith("/api")) {
+        let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+        if (capturedJsonResponse) {
+          logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+        }
+        log(logLine);
       }
+    });
 
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
-
-      log(logLine);
-    }
+    next();
   });
 
-  next();
-});
-
-(async () => {
-  // Initialize database with default sources
+  // Инициализация базы данных
   try {
     if ('initializeDefaultSources' in storage) {
       await (storage as any).initializeDefaultSources();
@@ -52,32 +69,33 @@ app.use((req, res, next) => {
 
   const server = await registerRoutes(app);
 
+  // Обработчик ошибок
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
-
     res.status(status).json({ message });
     throw err;
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
+  // Настройка Vite в development
   if (app.get("env") === "development") {
     await setupVite(app, server);
   } else {
     serveStatic(app);
   }
 
-  // ALWAYS serve the app on port 5002 (изменено для избежания конфликта)
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
+  // Запуск сервера
   const port = 5002;
   server.listen({
     port,
     host: "0.0.0.0"
-    // reusePort: true, // Удалено для совместимости с Node.js 22+
   }, () => {
-    log(`serving on port ${port}`);
+    log(`Server running on port ${port}`);
   });
-})();
+}
+
+// Запуск основного приложения
+main().catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});
