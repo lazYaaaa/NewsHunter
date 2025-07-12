@@ -1,11 +1,14 @@
 // userContext.tsx
 import React, { createContext, useState, type ReactNode } from 'react';
 
+
 interface User {
   id: string;
   email: string;
   firstName?: string;
   lastName?: string;
+  image?: string;       // добавляем, если в ответе есть
+  createdAt?: string;   // добавляем, если есть
 }
 
 interface UserContextType {

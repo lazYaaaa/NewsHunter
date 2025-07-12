@@ -3,11 +3,27 @@ import { Link } from 'wouter';
 import { useTheme } from '../context/context.tsx';
 import { UserContext } from '../context/UserContext.tsx';
 
+// Компонент NewsHunter (логотип + название)
+const NewsHunter: React.FC = () => {
+  return (
+    <Link
+      to="/"
+      className="flex items-center space-x-3 p-2 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors cursor-pointer"
+    >
+      {/* Логотип */}
+      <img src="/vite.svg" alt="Логотип" className="h-8 w-8" />
+      {/* Название */}
+      <span className="text-xl font-semibold text-gray-800 hover:text-gray-900 transition-colors">
+        NewsFlow
+      </span>
+    </Link>
+  );
+};
+
 export const Header: React.FC = () => {
   const { darkMode, toggleDarkMode } = useTheme();
 
   const { user, isAuthenticated, setUser, setAuthenticated } = useContext(UserContext)!;
-
 
   useEffect(() => {
     // Проверка аутентификации при загрузке
@@ -19,11 +35,11 @@ export const Header: React.FC = () => {
 
         if (response.ok) {
           const userData = await response.json();
-          console.log('Fetched user data:', userData); // Лог данных из API
+          console.log('Fetched user data:', userData);
           setUser(userData);
           setAuthenticated(true);
         } else {
-          console.log('Auth API response not ok, status:', response.status); // Лог статуса
+          console.log('Auth API response not ok, status:', response.status);
           setUser(null);
           setAuthenticated(false);
         }
@@ -34,7 +50,6 @@ export const Header: React.FC = () => {
       }
     };
 
-    // Проверяем только, если пользователь еще не аутентифицирован
     if (!isAuthenticated) {
       checkAuth();
     }
@@ -50,7 +65,7 @@ export const Header: React.FC = () => {
       if (response.ok) {
         setUser(null);
         setAuthenticated(false);
-        console.log('Logout successful, state updated'); // Лог после выхода
+        console.log('Logout successful, state updated');
       } else {
         console.log('Logout response not ok, status:', response.status);
       }
@@ -62,11 +77,8 @@ export const Header: React.FC = () => {
   return (
     <header className="bg-blue-700 dark:bg-gray-900 text-white py-4 mb-6 shadow-lg transition-colors duration-300">
       <div className="container mx-auto px-4 flex justify-between items-center">
-        {/* Логотип и название */}
-        <div className="flex items-center space-x-3">
-          <img src="/vite.svg" alt="Logo" className="h-8 w-8 object-contain" />
-          <h1 className="text-2xl font-bold tracking-wide">NewsFlow</h1>
-        </div>
+        {/* Логотип и название - клик по главной */}
+        <NewsHunter />
 
         {/* Панель управления */}
         <div className="flex items-center gap-4">
@@ -87,25 +99,26 @@ export const Header: React.FC = () => {
             )}
           </button>
 
-          {/* Ссылка "Главная" */}
-          <Link
-            to="/"
-            className="bg-yellow-400 hover:bg-yellow-500 text-blue-900 font-bold py-2 px-4 rounded shadow transition-all duration-200 border-2 border-yellow-500"
-          >
-            Главная
-          </Link>
-
-          {/* Условие отображения для авторизованных */}
+          {/* Профиль / вход */}
           {isAuthenticated && user ? (
             <>
-              {/* Профиль */}
-              <Link
-                to="/profile"
-                className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded shadow transition-all duration-200"
-              >
-                {user.firstName || 'Профиль'}
-              </Link>
-              {/* Выход */}
+              {/* Аватар и имя */}
+              <div className="flex items-center space-x-2">
+                {user.image && (
+                  <img
+                    src={user.image}
+                    alt="Аватар"
+                    className="w-8 h-8 rounded-full object-cover border-2 border-gray-300"
+                  />
+                )}
+                <Link
+                  to="/profile"
+                  className="bg-blue-400 hover:bg-blue-300 text-white font-bold py-2 px-3 rounded shadow transition-all duration-200 flex items-center"
+                >
+                  {user.firstName || 'Профиль'}
+                </Link>
+              </div>
+              {/* Выйти */}
               <button
                 onClick={handleLogout}
                 className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded shadow transition-all duration-200"

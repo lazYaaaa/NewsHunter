@@ -15,6 +15,32 @@ import cors from 'cors';
 import { randomUUID } from 'crypto';
 import { isLocalAuthenticated } from './localAuth';
 import 'express-session';
+import path from 'path';
+import fs from 'fs';
+import multer from 'multer';
+import { v2 as cloudinary } from 'cloudinary';
+
+cloudinary.config({
+  cloud_name: 'de7ivcdqi',      // замените на ваше название облака
+  api_key: '714875767842575',      // замените на ваш API ключ
+  api_secret: 'gOAtHtQifAYGwRcjbyfSwl2ftDI' // замените на ваш API секрет
+});
+const uploadDir = path.join(__dirname, 'uploads', 'profile-images');
+fs.mkdirSync(uploadDir, { recursive: true });
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      cb(null, uploadDir);
+    },
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname);
+      const filename = `${Date.now()}-${Math.round(Math.random() * 1E9)}${ext}`;
+      cb(null, filename);
+    },
+  }),
+  limits: { fileSize: 1024 * 1024 * 5 },
+});
 
 declare module 'express-session' {
   interface SessionData {
@@ -310,7 +336,9 @@ app.get('/api/auth/user', isLocalAuthenticated, async (req: Request, res: Respon
     id: authReq.user.id,
     email: authReq.user.email,
     firstName: authReq.user.firstName,
-    lastName: authReq.user.lastName
+    lastName: authReq.user.lastName,
+    createdAt: authReq.user.createdAt,
+    image : authReq.user.profileImageUrl
   });
 });
 app.post('/api/logout', (req: Request, res: Response) => {
@@ -327,6 +355,53 @@ app.post('/api/logout', (req: Request, res: Response) => {
     });
   } else {
     res.status(200).json({ message: 'Вы уже вышли' });
+  }
+});
+// Обработка загрузки фото профиля
+app.post('/api/auth/upload-profile-image', isLocalAuthenticated, upload.single('profileImage'), async (req, res) => {
+  const authReq = req as AuthenticatedRequest;
+
+  if (!authReq.user) {
+    return res.status(401).json({ error: 'Не авторизован' });
+  }
+
+  const file = req.file;
+  if (!file) {
+    return res.status(400).json({ error: 'Файл не выбран' });
+  }
+
+  try {
+    // Загружаем файл в Cloudinary
+    const result = await cloudinary.uploader.upload(file.path, {
+      folder: 'profile_images', // папка в облаке (опционально)
+      public_id: `${authReq.user.id}-${Date.now()}`, // уникальный id
+    });
+
+    const imageUrl = result.secure_url; // URL изображения из Cloudinary
+
+    // Обновляем пользователя в базе
+    await db
+      .update(users)
+      .set({ profileImageUrl: imageUrl })
+      .where(eq(users.id, authReq.user.id));
+
+    // Получаем обновленного пользователя
+    const [updatedUser] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, authReq.user.id));
+
+    res.json({
+      id: updatedUser.id,
+      email: updatedUser.email,
+      firstName: updatedUser.firstName,
+      lastName: updatedUser.lastName,
+      createdAt: updatedUser.createdAt,
+      profileImageUrl: updatedUser.profileImageUrl,
+    });
+  } catch (error) {
+    console.error('Ошибка загрузки в Cloudinary:', error);
+    res.status(500).json({ error: 'Ошибка при загрузке изображения' });
   }
 });
 
