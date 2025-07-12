@@ -404,6 +404,60 @@ app.post('/api/auth/upload-profile-image', isLocalAuthenticated, upload.single('
     res.status(500).json({ error: 'Ошибка при загрузке изображения' });
   }
 });
+/*app.post('/api/categories', async (req: Request, res: Response) => {
+  try {
+    const { name } = req.body;
+    if (!name || typeof name !== 'string') {
+      return res.status(400).json({ error: 'Invalid category name' });
+    }
+    const newCategory = await storage.createCategory({ name });
+    res.status(201).json(newCategory);
+  } catch (error) {
+    console.error('Ошибка при добавлении категории:', error);
+    res.status(500).json({ error: 'Failed to add category' });
+  }
+});
+app.delete('/api/categories/:id', async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    const success = await storage.deleteCategory(id);
+    if (success) {
+      res.status(204).send();
+    } else {
+      res.status(404).json({ error: 'Category not found' });
+    }
+  } catch (error) {
+    console.error('Ошибка при удалении категории:', error);
+    res.status(500).json({ error: 'Failed to delete category' });
+  }
+});*/
+app.post('/api/sources', async (req: Request, res: Response) => {
+  try {
+    const sourceData = schema.insertSourceSchema.parse(req.body);
+    const source = await storage.createSource(sourceData);
+    res.status(201).json(source);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid source data', details: error.errors });
+    }
+    console.error('Ошибка при добавлении источника:', error);
+    res.status(500).json({ error: 'Failed to add source' });
+  }
+});
+app.delete('/api/sources/:id', async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    const success = await storage.deleteSource(id);
+    if (success) {
+      res.status(204).send();
+    } else {
+      res.status(404).json({ error: 'Source not found' });
+    }
+  } catch (error) {
+    console.error('Ошибка при удалении источника:', error);
+    res.status(500).json({ error: 'Failed to delete source' });
+  }
+});
 
   // 10. 404 handler должен быть последним
   app.all('/api/*', (req: Request, res: Response) => {

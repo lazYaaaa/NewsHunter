@@ -70,6 +70,10 @@ export const insertUserSchema = createInsertSchema(users)
   .extend({
     password: z.string().min(8, "Пароль должен содержать минимум 8 символов"),
   });
+export const categories = pgTable('categories', {
+  id: serial('id').primaryKey(),
+  name: varchar('name', { length: 255 }).unique(),
+});
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;

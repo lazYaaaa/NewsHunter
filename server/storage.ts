@@ -38,6 +38,7 @@ export interface IStorage {
 
   // Categories
   getCategories(): Promise<Array<{ name: string; count: number }>>;
+  
 }
 
 export class MemStorage implements IStorage {
@@ -427,6 +428,7 @@ export class DatabaseStorage implements IStorage {
     
     return result.map(row => ({ name: row.name, count: row.count }));
   }
+  
 }
 
 // Use DatabaseStorage instead of MemStorage

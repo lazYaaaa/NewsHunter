@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ArticleCard } from './ArticleCard.tsx';
 import { useDebounce } from '../hooks/useDebounce.ts';
+import Filters from '../pages/Filters.tsx';
 
 interface Article {
     id: number;
@@ -112,6 +113,7 @@ export const ArticleList: React.FC = () => {
                     </button>
                 </div>
             </div>
+            <Filters />
 
             {loading && (
                 <div className="flex justify-center items-center py-12">
