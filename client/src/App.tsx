@@ -25,7 +25,6 @@ function App() {
           <Route path="/admin/articles">
             <ArticleAdmin />
           </Route>
-          {/* Новые маршруты */}
           <Route path="/login">
             <Login />
           </Route>

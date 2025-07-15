@@ -48,7 +48,10 @@ async function main() {
       if (path.startsWith("/api")) {
         let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
         if (capturedJsonResponse) {
-          logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+          const jsonString = JSON.stringify(capturedJsonResponse);
+          if (jsonString.length < 30) {
+             logLine += ` :: ${jsonString}`;
+          }
         }
         log(logLine);
       }

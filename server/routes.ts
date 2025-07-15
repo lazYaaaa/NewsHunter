@@ -197,10 +197,10 @@ return res.json({
       const articles = await storage.getArticles(params);
       return res.json(articles);
     } catch (error) {
-      console.error('Failed to fetch articles:', error);
+      //console.error('Failed to fetch articles:', error);
       return res.status(500).json({ 
         error: "Failed to fetch articles",
-        details: error instanceof Error ? error.message : 'Unknown error'
+        //details: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   });
@@ -217,7 +217,7 @@ return res.json({
       await storage.updateArticle(id, { views: article.views + 1 });
       return res.json({ ...article, views: article.views + 1 });
     } catch (error) {
-      console.error('Failed to fetch article:', error);
+      //console.error('Failed to fetch article:', error);
       return res.status(500).json({ error: "Failed to fetch article" });
     }
   });
@@ -228,7 +228,7 @@ return res.json({
       const sources = await storage.getSources();
       return res.json(sources);
     } catch (error) {
-      console.error('Failed to fetch sources:', error);
+      //console.error('Failed to fetch sources:', error);
       return res.status(500).json({ error: "Failed to fetch sources" });
     }
   });
@@ -312,7 +312,7 @@ return res.json({
 
           await storage.updateSource(source.id, { lastFetched: new Date() });
         } catch (error) {
-          console.error(`Failed to parse feed for source ${source.name}:`, error);
+          //console.error(`Failed to parse feed for source ${source.name}:`, error);
         }
       }
 
@@ -321,7 +321,7 @@ return res.json({
         newArticles: totalNewArticles 
       });
     } catch (error) {
-      console.error('Failed to refresh feeds:', error);
+      //console.error('Failed to refresh feeds:', error);
       return res.status(500).json({ error: "Failed to refresh feeds" });
     }
   });
