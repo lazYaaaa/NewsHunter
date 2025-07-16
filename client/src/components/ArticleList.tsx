@@ -24,24 +24,38 @@ export const ArticleList: React.FC = () => {
     const debouncedSearchQuery = useDebounce(searchQuery, 600);
 
     const fetchArticles = (reset = false) => {
-        let url = `/api/articles?limit=12&offset=${reset ? 0 : (page - 1) * 12}`;
-        if (date) url += `&publishedAfter=${date}`;
-        if (debouncedSearchQuery) url += `&search=${encodeURIComponent(debouncedSearchQuery)}`;
+    let url = `/api/articles?limit=12&offset=${reset ? 0 : (page - 1) * 12}`;
+    
+    // Добавляем параметр даты только если она выбрана
+    if (date) {
+        const isoDate = `${date}T00:00:00`;
+        url += `&publishedAfter=${encodeURIComponent(isoDate)}`;
+    }
+    
+    if (debouncedSearchQuery) {
+        url += `&search=${encodeURIComponent(debouncedSearchQuery)}`;
+    }
 
-        setLoading(true);
-        fetch(url)
-            .then(res => res.json())
-            .then(data => {
-                if (reset) {
-                    setArticles(data);
-                } else {
-                    setArticles(prev => [...prev, ...data]);
-                }
-                setHasMore(data.length === 12);
-                setLoading(false);
-            })
-            .catch(() => setLoading(false));
-    };
+    setLoading(true);
+    fetch(url)
+        .then(res => {
+            if (!res.ok) throw new Error('Network response was not ok');
+            return res.json();
+        })
+        .then(data => {
+            if (reset) {
+                setArticles(data);
+            } else {
+                setArticles(prev => [...prev, ...data]);
+            }
+            setHasMore(data.length === 12);
+            setLoading(false);
+        })
+        .catch(error => {
+            console.error('Fetch error:', error);
+            setLoading(false);
+        });
+};
 
     useEffect(() => {
         setPage(1);
@@ -57,6 +71,29 @@ export const ArticleList: React.FC = () => {
         setDate('');
         setPage(1);
     };
+    const handleRefresh = async () => {
+  setLoading(true);
+  try {
+    const response = await fetch('/api/refresh', {
+      method: 'POST'
+    });
+    
+    if (!response.ok) {
+      throw new Error('Refresh failed');
+    }
+    
+    const result = await response.json();
+    console.log('Refresh result:', result);
+    
+    // После обновления данных загружаем свежий список статей
+    fetchArticles(true);
+    
+  } catch (error) {
+    console.error('Refresh error:', error);
+  } finally {
+    setLoading(false);
+  }
+};
 
     return (
         <div className="w-full flex flex-col items-stretch bg-white dark:bg-gray-900 p-4 rounded-lg shadow-xl">
@@ -106,7 +143,7 @@ export const ArticleList: React.FC = () => {
                         </button>
                     )}
                     <button
-                        onClick={() => fetchArticles(true)}
+                        onClick={handleRefresh}
                         className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded shadow transition-all duration-200"
                     >
                         Обновить

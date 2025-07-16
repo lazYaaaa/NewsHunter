@@ -183,27 +183,42 @@ return res.json({
   // 5. Articles endpoints
   app.get("/api/articles", async (req: Request, res: Response) => {
     try {
-      const { category, sourceId, search, limit, offset, publishedAfter } = req.query;
-      
-      const params = {
-        category: category as string | undefined,
-        sourceId: sourceId ? parseInt(sourceId as string) : undefined,
-        search: search as string | undefined,
-        limit: limit ? parseInt(limit as string) : 20,
-        offset: offset ? parseInt(offset as string) : 0,
-        publishedAfter: publishedAfter ? new Date(publishedAfter as string) : undefined
-      };
+        const { category, sourceId, search, limit, offset, publishedAfter } = req.query;
+        
+        // Добавляем проверку publishedAfter
+        let publishedAfterDate: Date | undefined;
+        if (publishedAfter && typeof publishedAfter === 'string' && publishedAfter.trim() !== '') {
+            try {
+                publishedAfterDate = new Date(decodeURIComponent(publishedAfter));
+                if (isNaN(publishedAfterDate.getTime())) {
+                    publishedAfterDate = undefined;
+                }
+            } catch (e) {
+                publishedAfterDate = undefined;
+            }
+        }
 
-      const articles = await storage.getArticles(params);
-      return res.json(articles);
+        const params = {
+            category: category as string | undefined,
+            sourceId: sourceId ? parseInt(sourceId as string) : undefined,
+            search: search as string | undefined,
+            limit: limit ? parseInt(limit as string) : 20,
+            offset: offset ? parseInt(offset as string) : 0,
+            publishedAfter: publishedAfterDate
+        };
+
+        console.log('Fetching articles with params:', params); // Логирование для отладки
+
+        const articles = await storage.getArticles(params);
+        return res.json(articles);
     } catch (error) {
-      //console.error('Failed to fetch articles:', error);
-      return res.status(500).json({ 
-        error: "Failed to fetch articles",
-        //details: error instanceof Error ? error.message : 'Unknown error'
-      });
+        console.error('Failed to fetch articles:', error);
+        return res.status(500).json({ 
+            error: "Failed to fetch articles",
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
     }
-  });
+});
 
   app.get("/api/articles/:id", async (req: Request, res: Response) => {
     try {

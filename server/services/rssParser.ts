@@ -60,8 +60,13 @@ export class RSSParser {
       try {
         const itemXml = itemMatch[1];
         const link = this.extractFirstValidLink(itemXml);
-        const description = this.extractTag(itemXml, 'description') || 
-                          this.extractTag(itemXml, 'content:encoded') || '';
+        let description = this.extractTag(itemXml, 'description') || 
+                        this.extractTag(itemXml, 'content:encoded') || '';
+
+        // Специальная обработка для Hacker News
+        if (link.includes('news.ycombinator.com') && description.startsWith('<a href="')) {
+          description = `Link to discussion: ${link}`;
+        }
 
         const feedItem: FeedItem = {
           title: this.cleanText(this.extractTag(itemXml, 'title') || 'Untitled'),
@@ -98,14 +103,44 @@ export class RSSParser {
 
   private async fetchAndParseArticle(url: string): Promise<{ content: string; images: string[] }> {
     const html = await this.fetchArticleContent(url);
+    
+    // Специальная обработка для TechCrunch
+    if (url.includes('techcrunch.com')) {
+      const jsonLd = this.extractJsonLd(html);
+      if (jsonLd?.articleBody) {
+        return {
+          content: jsonLd.articleBody,
+          images: jsonLd.image ? [jsonLd.image.url] : []
+        };
+      }
+    }
+
     return {
       content: this.extractMainContent(html),
       images: this.extractAllImages(html, url)
     };
   }
 
+  private extractJsonLd(html: string): { articleBody?: string; image?: { url: string } } | null {
+    const scriptRegex = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/i;
+    const match = html.match(scriptRegex);
+    if (!match) return null;
+
+    try {
+      const json = JSON.parse(match[1]);
+      if (json['@graph']) {
+        // Обработка структуры с @graph
+        const article = json['@graph'].find((item: any) => item['@type'] === 'Article');
+        return article || null;
+      }
+      return json;
+    } catch (e) {
+      console.error('Error parsing JSON-LD:', e);
+      return null;
+    }
+  }
+
   private extractMainContent(html: string): string {
-    // Упрощенная логика извлечения основного контента
     const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
     if (!bodyMatch) return html;
 
@@ -128,7 +163,6 @@ export class RSSParser {
       }
     }
 
-    // Добавляем OpenGraph/twitter изображения
     const metaImage = this.extractMetaImage(html, baseUrl);
     if (metaImage) images.add(metaImage);
 
@@ -147,16 +181,13 @@ export class RSSParser {
 
   private async extractBestImage(itemXml: string, itemLink: string): Promise<string | undefined> {
     try {
-      // 1. RSS-специфичные изображения
       const rssImage = this.extractImageFromRss(itemXml);
       if (rssImage) return this.normalizeUrl(rssImage, itemLink);
 
-      // 2. Изображения в описании
       const description = this.extractTag(itemXml, 'description') || '';
       const descImage = this.extractImageFromHtml(description, itemLink);
       if (descImage) return descImage;
 
-      // 3. Специальные обработчики для известных источников
       if (itemLink.includes('techcrunch.com')) {
         return this.handleTechCrunchImage(itemLink);
       }
@@ -165,7 +196,6 @@ export class RSSParser {
         return this.extractYoutubeThumbnail(itemLink);
       }
 
-      // 4. Общий fallback
       if (this.fetchFullPage) {
         const html = await this.fetchArticleContent(itemLink);
         return this.extractMetaImage(html, itemLink) || 
@@ -208,24 +238,13 @@ export class RSSParser {
   private async handleTechCrunchImage(articleUrl: string): Promise<string | undefined> {
     try {
       const html = await this.fetchArticleContent(articleUrl);
-      const image = this.extractMetaImage(html, articleUrl) || 
-                   this.extractFirstContentImage(html, articleUrl);
-
-      if (!image && articleUrl.includes('techcrunch.com')) {
-        // Fallback для TechCrunch: поиск в JSON-LD
-        const jsonLd = html.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/i)?.[1];
-        if (jsonLd) {
-          try {
-            const json = JSON.parse(jsonLd);
-            if (json.image?.url) {
-              return this.normalizeUrl(json.image.url, articleUrl);
-            }
-          } catch (e) {
-            console.error('JSON-LD parse error:', e);
-          }
-        }
+      const jsonLd = this.extractJsonLd(html);
+      if (jsonLd?.image?.url) {
+        return this.normalizeUrl(jsonLd.image.url, articleUrl);
       }
 
+      const image = this.extractMetaImage(html, articleUrl) || 
+                   this.extractFirstContentImage(html, articleUrl);
       return image;
     } catch (error) {
       console.error(`TechCrunch image fetch failed:`, error);
@@ -280,7 +299,6 @@ export class RSSParser {
 
   private safeDateParse(dateStr: string): Date {
     try {
-      // Обработка форматов типа "Wed, 02 Oct 2025 08:00:00 GMT"
       const date = new Date(dateStr.replace(/(\d{2}) (\w{3}) (\d{4})/, '$2 $1 $3'));
       return isNaN(date.getTime()) ? new Date() : date;
     } catch {
@@ -354,7 +372,7 @@ export class RSSParser {
   private async fetchArticleContent(url: string): Promise<string> {
     const response = await fetch(url, { 
       headers: { 'User-Agent': this.userAgent },
-      signal: AbortSignal.timeout(5000) // Таймаут 5 секунд
+      signal: AbortSignal.timeout(5000)
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return await response.text();
@@ -366,10 +384,16 @@ export class RSSParser {
     sourceName: string,
     defaultCategory: string
   ): InsertArticle {
+    // Специальная обработка для Hacker News
+    let content = item.fullContent || item.description;
+    if (item.link.includes('news.ycombinator.com') && content === item.link) {
+      content = `Discussion link: ${item.link}`;
+    }
+
     return {
       title: item.title.substring(0, 255),
-      content: item.fullContent || item.description,
-      excerpt: this.extractExcerpt(item.fullContent || item.description),
+      content,
+      excerpt: this.extractExcerpt(content),
       url: item.link.substring(0, 512),
       imageUrl: item.image?.substring(0, 512) || null,
       category: (item.categories?.[0] || defaultCategory).substring(0, 100),
