@@ -35,7 +35,7 @@ export const Header: React.FC = () => {
 
         if (response.ok) {
           const userData = await response.json();
-          console.log('Fetched user data:', userData);
+          //console.log('Fetched user data:', userData);
           setUser(userData);
           setAuthenticated(true);
         } else {

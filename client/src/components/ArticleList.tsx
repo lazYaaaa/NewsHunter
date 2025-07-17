@@ -20,42 +20,42 @@ export const ArticleList: React.FC = () => {
     const [date, setDate] = useState('');
     const [page, setPage] = useState(1);
     const [hasMore, setHasMore] = useState(true);
+    const [warnings, setWarnings] = useState<string[]>([]); // для ворнингов
 
     const debouncedSearchQuery = useDebounce(searchQuery, 600);
 
     const fetchArticles = (reset = false) => {
-    let url = `/api/articles?limit=12&offset=${reset ? 0 : (page - 1) * 12}`;
-    
-    // Добавляем параметр даты только если она выбрана
-    if (date) {
-        const isoDate = `${date}T00:00:00`;
-        url += `&publishedAfter=${encodeURIComponent(isoDate)}`;
-    }
-    
-    if (debouncedSearchQuery) {
-        url += `&search=${encodeURIComponent(debouncedSearchQuery)}`;
-    }
+        let url = `/api/articles?limit=12&offset=${reset ? 0 : (page - 1) * 12}`;
 
-    setLoading(true);
-    fetch(url)
-        .then(res => {
-            if (!res.ok) throw new Error('Network response was not ok');
-            return res.json();
-        })
-        .then(data => {
-            if (reset) {
-                setArticles(data);
-            } else {
-                setArticles(prev => [...prev, ...data]);
-            }
-            setHasMore(data.length === 12);
-            setLoading(false);
-        })
-        .catch(error => {
-            console.error('Fetch error:', error);
-            setLoading(false);
-        });
-};
+        if (date) {
+            const isoDate = `${date}T00:00:00`;
+            url += `&publishedAfter=${encodeURIComponent(isoDate)}`;
+        }
+
+        if (debouncedSearchQuery) {
+            url += `&search=${encodeURIComponent(debouncedSearchQuery)}`;
+        }
+
+        setLoading(true);
+        fetch(url)
+            .then(res => {
+                if (!res.ok) throw new Error('Network response was not ok');
+                return res.json();
+            })
+            .then(data => {
+                if (reset) {
+                    setArticles(data);
+                } else {
+                    setArticles(prev => [...prev, ...data]);
+                }
+                setHasMore(data.length === 12);
+                setLoading(false);
+            })
+            .catch(error => {
+                console.error('Fetch error:', error);
+                setLoading(false);
+            });
+    };
 
     useEffect(() => {
         setPage(1);
@@ -71,32 +71,51 @@ export const ArticleList: React.FC = () => {
         setDate('');
         setPage(1);
     };
+
     const handleRefresh = async () => {
-  setLoading(true);
-  try {
-    const response = await fetch('/api/refresh', {
-      method: 'POST'
-    });
-    
-    if (!response.ok) {
-      throw new Error('Refresh failed');
-    }
-    
-    const result = await response.json();
-    console.log('Refresh result:', result);
-    
-    // После обновления данных загружаем свежий список статей
-    fetchArticles(true);
-    
-  } catch (error) {
-    console.error('Refresh error:', error);
-  } finally {
-    setLoading(false);
-  }
-};
+        setLoading(true);
+        setWarnings([]); // очистить ворнинги перед новым обновлением
+        try {
+            const response = await fetch('/api/refresh', {
+                method: 'POST'
+            });
+
+            if (!response.ok) {
+                throw new Error('Refresh failed');
+            }
+
+            const result = await response.json();
+            console.log('Refresh result:', result);
+
+            // Добавляем ворнинги из ответа
+            if (result.warnings && result.warnings.length > 0) {
+                setWarnings(prev => [...prev, ...result.warnings]);
+            }
+
+            // Обновляем список статей
+            await fetchArticles(true);
+        } catch (error) {
+            console.error('Refresh error:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     return (
         <div className="w-full flex flex-col items-stretch bg-white dark:bg-gray-900 p-4 rounded-lg shadow-xl">
+            {/* Ворнинги */}
+            {warnings.length > 0 && (
+                <div className="mb-4 p-2 bg-yellow-100 text-yellow-800 rounded">
+                    <h4 className="font-semibold mb-2">Внимание:</h4>
+                    <ul className="list-disc list-inside">
+                        {warnings.map((warn, index) => (
+                            <li key={index}>{warn}</li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+
+            {/* Фильтры и кнопки */}
             <div className="flex flex-col sm:flex-row items-center justify-between w-full mb-8 gap-4">
                 <div className="flex flex-col sm:flex-row gap-4 w-full">
                     <div className="relative flex-grow">
@@ -127,7 +146,7 @@ export const ArticleList: React.FC = () => {
                         <input
                             type="date"
                             value={date}
-                            onChange={e => setDate(e.target.value)}
+                            onChange={(e) => setDate(e.target.value)}
                             className="px-2 py-1 border rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white dark:bg-gray-900"
                         />
                     </label>
@@ -150,14 +169,18 @@ export const ArticleList: React.FC = () => {
                     </button>
                 </div>
             </div>
+
+            {/* Компонент фильтров */}
             <Filters />
 
+            {/* Загрузка */}
             {loading && (
                 <div className="flex justify-center items-center py-12">
                     <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-blue-500 border-solid"></div>
                 </div>
             )}
 
+            {/* Нет данных */}
             {!loading && !articles.length && (
                 <div className="text-lg text-gray-500 dark:text-gray-400 mt-8 text-center">
                     {searchQuery || date
@@ -166,16 +189,18 @@ export const ArticleList: React.FC = () => {
                 </div>
             )}
 
+            {/* Список статей */}
             <div className="w-full grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-8">
                 {articles.map(article => (
                     <ArticleCard key={article.id} {...article} />
                 ))}
             </div>
 
+            {/* Кнопка показать еще */}
             {!loading && hasMore && (
                 <div className="flex justify-center mt-8">
                     <button
-                        onClick={() => setPage(p => p + 1)}
+                        onClick={() => setPage((p) => p + 1)}
                         className="bg-yellow-400 hover:bg-yellow-500 text-blue-900 font-bold py-2 px-8 rounded shadow-lg text-lg transition-all duration-200"
                     >
                         Показать ещё

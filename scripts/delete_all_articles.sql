@@ -2,6 +2,8 @@
 DELETE FROM articles;
 SELECT * FROM users;
 
+select * from sources
+
 -- Функция фильтрации новостей по дате публикации
 -- Возвращает все статьи, опубликованные после указанной даты
 CREATE OR REPLACE FUNCTION filter_articles_by_date(published_after DATE)

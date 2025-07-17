@@ -303,43 +303,47 @@ return res.json({
 
   // 9. RSS refresh endpoint
   app.post("/api/refresh", async (req: Request, res: Response) => {
-    try {
-      const sources = await storage.getSources();
-      let totalNewArticles = 0;
+  const warnings: string[] = [];
+  let totalNewArticles = 0;
 
-      for (const source of sources.filter(s => s.isActive)) {
-        try {
-          const feedItems = await rssParser.parseFeed(source.url);
-          
-          for (const item of feedItems) {
-            const existing = await storage.getArticleByUrl(item.link);
-            if (!existing) {
-              const articleData = rssParser.createArticleFromFeedItem(
-                item, 
-                source.id, 
-                source.name, 
-                source.category
-              );
-              await storage.createArticle(articleData);
-              totalNewArticles++;
-            }
+  try {
+    const sources = await storage.getSources();
+
+    for (const source of sources.filter(s => s.isActive)) {
+      try {
+        const { items, warnings: parseWarnings } = await rssParser.parseFeed(source.url);
+        // добавляем warnings из парсера
+        warnings.push(...parseWarnings);
+
+        for (const item of items) {
+          const existing = await storage.getArticleByUrl(item.link);
+          if (!existing) {
+            const articleData = rssParser.createArticleFromFeedItem(
+              item,
+              source.id,
+              source.name,
+              source.category
+            );
+            await storage.createArticle(articleData);
+            totalNewArticles++;
           }
-
-          await storage.updateSource(source.id, { lastFetched: new Date() });
-        } catch (error) {
-          //console.error(`Failed to parse feed for source ${source.name}:`, error);
         }
-      }
 
-      return res.json({ 
-        message: `Refresh completed. Added ${totalNewArticles} new articles.`,
-        newArticles: totalNewArticles 
-      });
-    } catch (error) {
-      //console.error('Failed to refresh feeds:', error);
-      return res.status(500).json({ error: "Failed to refresh feeds" });
+        await storage.updateSource(source.id, { lastFetched: new Date() });
+      } catch (error) {
+        warnings.push(`Failed to parse feed for source ${source.name}`);
+      }
     }
-  });
+
+    return res.json({ 
+      message: `Refresh completed. Added ${totalNewArticles} new articles.`,
+      newArticles: totalNewArticles,
+      warnings,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: "Failed to refresh feeds" });
+  }
+});
 app.get('/api/auth/user', isLocalAuthenticated, async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
   

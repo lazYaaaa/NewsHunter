@@ -19,215 +19,272 @@ export class RSSParser {
   public fetchFullPage = false;
   public enableImageFetch = true;
 
-  async parseFeed(url: string, sourceId?: number, sourceName?: string): Promise<FeedItem[]> {
+  private previousItemsCache: { [link: string]: FeedItem } = {};
+  private errorSet: Set<string> = new Set();
+
+  async parseFeed(
+    url: string,
+    sourceId?: number,
+    sourceName?: string
+  ): Promise<{ items: FeedItem[]; warnings: string[] }> {
+    const warnings: string[] = [];
+    const items: FeedItem[] = [];
     try {
-      const response = await this.fetchWithRedirects(url);
+      const response = await this.fetchWithRedirects(url, warnings);
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      
-      const items = await this.parseXML(await response.text());
-      return items.map(item => ({
-        ...item,
-        sourceId,
-        sourceName
-      }));
-    } catch (error) {
-      console.error(`Error parsing RSS feed ${url}:`, error);
-      return [];
+      const xmlText = await response.text();
+
+      const isAtom = /<feed[^>]*>/i.test(xmlText);
+      const entries = await this.parseXML(xmlText, isAtom, warnings);
+
+      for (const entry of entries) {
+        if (entry.warning) {
+          warnings.push(entry.warning);
+        }
+        if (entry.item) {
+          items.push({ ...entry.item, sourceId, sourceName });
+        }
+      }
+    } catch (e: any) {
+      this.addWarning(warnings, `Failed to parse feed from ${url}: ${e.message}`);
     }
+    return { items, warnings };
   }
 
-  private async fetchWithRedirects(url: string, redirectCount = 0): Promise<Response> {
+  private async fetchWithRedirects(
+    url: string,
+    warnings: string[],
+    redirectCount = 0
+  ): Promise<Response> {
+    warnings ??= [];
     const response = await fetch(url, {
       headers: { 'User-Agent': this.userAgent },
       redirect: 'manual'
     });
-
     if (response.status >= 300 && response.status < 400 && redirectCount < this.maxRedirects) {
       const location = response.headers.get('location');
       if (location) {
-        return this.fetchWithRedirects(new URL(location, url).toString(), redirectCount + 1);
+        const newUrl = new URL(location, url).toString();
+        this.addWarning(warnings, `Redirected from ${url} to ${newUrl}`);
+        return this.fetchWithRedirects(newUrl, warnings, redirectCount + 1);
       }
     }
     return response;
   }
 
-  private async parseXML(xmlText: string): Promise<FeedItem[]> {
-    const items: FeedItem[] = [];
-    const itemRegex = /<item[^>]*>([\s\S]*?)<\/item>/gi;
-    let itemMatch;
+  private async parseXML(
+    xmlText: string,
+    isAtom: boolean,
+    warnings?: string[]
+  ): Promise<Array<{ item: FeedItem | null; warning?: string }>> {
+    warnings ??= [];
+    const results: Array<{ item: FeedItem | null; warning?: string }> = [];
+    const regex = isAtom ? /<entry[^>]*>([\s\S]*?)<\/entry>/gi : /<item[^>]*>([\s\S]*?)<\/item>/gi;
+    let match;
 
-    while ((itemMatch = itemRegex.exec(xmlText)) !== null) {
+    while ((match = regex.exec(xmlText)) !== null) {
       try {
-        const itemXml = itemMatch[1];
-        const link = this.extractFirstValidLink(itemXml);
-        let description = this.extractTag(itemXml, 'description') || 
-                        this.extractTag(itemXml, 'content:encoded') || '';
+        const entryXml = match[1];
 
-        // Специальная обработка для Hacker News
-        if (link.includes('news.ycombinator.com') && description.startsWith('<a href="')) {
-          description = `Link to discussion: ${link}`;
+        // Перед вызовами проверяем warnings
+        warnings ??= [];
+
+        const linkCandidate = this.extractFirstValidLink(entryXml, warnings);
+        const link = linkCandidate || this.extractTag(entryXml, 'link', warnings) || '';
+
+        if (!link || !this.isValidUrl(link)) {
+          this.addWarning(warnings, `Invalid or missing URL in entry`);
+          results.push({ item: null, warning: `Invalid or missing URL in entry` });
+          continue;
         }
 
-        const feedItem: FeedItem = {
-          title: this.cleanText(this.extractTag(itemXml, 'title') || 'Untitled'),
-          description,
+        const isHackerNews = link.includes('hnrss.org') || this.extractTag(entryXml, 'link', warnings)?.includes('news.ycombinator');
+
+        const title = this.extractTag(entryXml, 'title', warnings) || 'Untitled';
+
+        let description = this.extractTag(entryXml, 'description', warnings) || this.extractTag(entryXml, 'content:encoded', warnings) || '';
+
+        if (isHackerNews) {
+          // Дополнительная обработка
+        }
+
+        if (description.includes('http://') || description.includes('https://')) {
+          // Есть ссылки в описании
+        }
+
+        const pubdateStr = this.extractTag(entryXml, 'pubDate', warnings) || this.extractTag(entryXml, 'published', warnings) || '';
+        const pubdate = pubdateStr ? this.safeDateParse(pubdateStr, warnings) : new Date();
+
+        const categories = this.extractCategories(entryXml, warnings);
+
+        const item: FeedItem = {
+          title: this.cleanText(title),
+          description: this.cleanText(description),
           link,
-          pubdate: this.parseDate(itemXml),
-          categories: this.extractCategories(itemXml),
+          pubdate,
+          categories,
         };
 
         if (this.enableImageFetch) {
-          feedItem.image = await this.extractBestImage(itemXml, link);
+          try {
+            item.image = await this.extractBestImage(entryXml, link, warnings);
+          } catch (err) {
+            this.addWarning(warnings, `Error extracting image for ${link}: ${(err as Error).message}`);
+          }
         }
 
         if (this.fetchFullPage || this.needsFullContent(link)) {
           try {
-            const { content, images } = await this.fetchAndParseArticle(link);
-            feedItem.fullContent = content;
-            if (!feedItem.image && images.length > 0) {
-              feedItem.image = images[0];
+            const { content, images } = await this.fetchAndParseArticle(link, warnings);
+            item.fullContent = content;
+            if (!item.image && images.length > 0) {
+              item.image = images[0];
             }
-          } catch (error) {
-            console.error(`Failed to fetch full content for ${link}:`, error);
+          } catch (err) {
+            this.addWarning(warnings, `Failed to fetch full content for ${link}: ${(err as Error).message}`);
           }
         }
 
-        items.push(feedItem);
-      } catch (error) {
-        console.error('Error processing RSS item:', error);
+        this.previousItemsCache[link] = item;
+        results.push({ item });
+      } catch (err: any) {
+        this.addWarning(warnings, `Error processing entry: ${(err as Error).message}`);
+        results.push({ item: null, warning: `Error processing entry` });
       }
     }
-
-    return items;
+    return results;
   }
 
-  private async fetchAndParseArticle(url: string): Promise<{ content: string; images: string[] }> {
-    const html = await this.fetchArticleContent(url);
-    
-    // Специальная обработка для TechCrunch
-    if (url.includes('techcrunch.com')) {
-      const jsonLd = this.extractJsonLd(html);
-      if (jsonLd?.articleBody) {
-        return {
-          content: jsonLd.articleBody,
-          images: jsonLd.image ? [jsonLd.image.url] : []
-        };
+  private async fetchAndParseArticle(url: string, warnings?: string[]): Promise<{ content: string; images: string[] }> {
+    warnings ??= [];
+    try {
+      const html = await this.fetchArticleContent(url, warnings);
+      if (url.includes('techcrunch.com')) {
+        const jsonLd = this.extractJsonLd(html, warnings);
+        if (jsonLd?.image?.url) {
+          return {
+            content: jsonLd.articleBody || '',
+            images: jsonLd.image ? [jsonLd.image.url] : []
+          };
+        }
       }
+      return {
+        content: this.extractMainContent(html, warnings),
+        images: this.extractAllImages(html, url, warnings)
+      };
+    } catch (err) {
+      throw err;
     }
-
-    return {
-      content: this.extractMainContent(html),
-      images: this.extractAllImages(html, url)
-    };
   }
 
-  private extractJsonLd(html: string): { articleBody?: string; image?: { url: string } } | null {
+  private extractJsonLd(html: string, warnings: string[]): any | null {
+    warnings ??= [];
     const scriptRegex = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/i;
     const match = html.match(scriptRegex);
     if (!match) return null;
-
     try {
       const json = JSON.parse(match[1]);
       if (json['@graph']) {
-        // Обработка структуры с @graph
         const article = json['@graph'].find((item: any) => item['@type'] === 'Article');
         return article || null;
       }
       return json;
     } catch (e) {
-      console.error('Error parsing JSON-LD:', e);
+      this.addWarning(warnings, 'Error parsing JSON-LD: ' + e);
       return null;
     }
   }
 
-  private extractMainContent(html: string): string {
+  private extractMainContent(html: string, warnings: string[]): string {
+    warnings ??= [];
     const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
     if (!bodyMatch) return html;
 
     const body = bodyMatch[1];
-    const articleMatch = body.match(/<article[^>]*>([\s\S]*?)<\/article>/i) ||
-                       body.match(/<div[^>]+class=["'].*article["'][^>]*>([\s\S]*?)<\/div>/i);
-    
-    return articleMatch ? articleMatch[1] : body;
+
+    const articleMatch = body.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
+    if (articleMatch) return articleMatch[1];
+
+    const divMatch = body.match(/<div[^>]+class=["'][^"']*(article|main|content)[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
+    if (divMatch) return divMatch[2];
+
+    return body;
   }
 
-  private extractAllImages(html: string, baseUrl: string): string[] {
+  private extractAllImages(html: string, baseUrl: string, warnings: string[]): string[] {
+    warnings ??= [];
     const images = new Set<string>();
     const imgRegex = /<img[^>]+src=["']([^"']+)["']/gi;
-    let imgMatch;
-
-    while ((imgMatch = imgRegex.exec(html)) !== null) {
-      const url = this.normalizeUrl(imgMatch[1], baseUrl);
+    let match;
+    while ((match = imgRegex.exec(html)) !== null) {
+      const url = this.normalizeUrl(match[1], baseUrl);
       if (this.isImageUrl(url)) {
         images.add(url);
       }
     }
-
-    const metaImage = this.extractMetaImage(html, baseUrl);
+    const metaImage = this.extractMetaImage(html, baseUrl, warnings);
     if (metaImage) images.add(metaImage);
-
     return Array.from(images);
   }
 
   private needsFullContent(link: string): boolean {
-    const domainsRequiringFullContent = [
-      'techcrunch.com',
-      'news.ycombinator.com',
-      'medium.com',
-      'github.com'
-    ];
-    return domainsRequiringFullContent.some(domain => link.includes(domain));
+    const domains = ['techcrunch.com', 'news.ycombinator.com', 'medium.com', 'github.com'];
+    return domains.some(domain => link.includes(domain));
   }
 
-  private async extractBestImage(itemXml: string, itemLink: string): Promise<string | undefined> {
+  private async extractBestImage(entryXml: string, link: string, warnings?: string[]): Promise<string | undefined> {
+    warnings ??= [];
     try {
-      const rssImage = this.extractImageFromRss(itemXml);
-      if (rssImage) return this.normalizeUrl(rssImage, itemLink);
+      const rssImage = this.extractImageFromRss(entryXml, warnings);
+      if (rssImage) return this.normalizeUrl(rssImage, link);
 
-      const description = this.extractTag(itemXml, 'description') || '';
-      const descImage = this.extractImageFromHtml(description, itemLink);
+      const description = this.extractTag(entryXml, 'description', warnings) || '';
+      const descImage = this.extractImageFromHtml(description, link, warnings);
       if (descImage) return descImage;
 
-      if (itemLink.includes('techcrunch.com')) {
-        return this.handleTechCrunchImage(itemLink);
+      if (link.includes('techcrunch.com')) {
+        return this.handleTechCrunchImage(link, warnings);
       }
 
-      if (itemLink.includes('youtube.com') || itemLink.includes('youtu.be')) {
-        return this.extractYoutubeThumbnail(itemLink);
+      if (link.includes('youtube.com') || link.includes('youtu.be')) {
+        return this.extractYoutubeThumbnail(link);
       }
 
       if (this.fetchFullPage) {
-        const html = await this.fetchArticleContent(itemLink);
-        return this.extractMetaImage(html, itemLink) || 
-               this.extractFirstContentImage(html, itemLink);
+        try {
+          const html = await this.fetchArticleContent(link, warnings);
+          return this.extractMetaImage(html, link, warnings) || this.extractFirstContentImage(html, link, warnings);
+        } catch (err) {
+          this.addWarning(warnings, `Error fetching full page for image from ${link}: ${(err as Error).message}`);
+        }
       }
-    } catch (error) {
-      console.error(`Image extraction failed for ${itemLink}:`, error);
+    } catch (e) {
+      this.addWarning(warnings, `Image extraction failed for ${link}: ${(e as Error).message}`);
     }
     return undefined;
   }
 
   private extractYoutubeThumbnail(url: string): string | undefined {
     try {
-      const videoId = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i)?.[1];
-      if (videoId) {
-        return `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+      const idMatch = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i);
+      if (idMatch && idMatch[1]) {
+        return `https://img.youtube.com/vi/${idMatch[1]}/maxresdefault.jpg`;
       }
-    } catch (error) {
-      console.error('YouTube thumbnail extraction failed:', error);
+    } catch (e) {
+      // Нет warnings здесь, потому что warnings не передается
     }
     return undefined;
   }
 
-  private extractImageFromRss(xml: string): string | null {
+  private extractImageFromRss(xml: string, warnings: string[]): string | null {
+    warnings ??= [];
     const patterns = [
-      /<media:thumbnail[^>]+url="([^"]+)"/i,
-      /<media:content[^>]+url="([^"]+)"[^>]+medium="image"/i,
-      /<enclosure[^>]+url="([^"]+)"[^>]+type="image\//i,
-      /<image[^>]*>\s*<url>([^<]+)/i,
-      /<itunes:image[^>]+href="([^"]+)"/i
+      /<media:thumbnail[^>]+url=["']([^"']+)["']/i,
+      /<media:content[^>]+url=["']([^"']+)["'][^>]*medium=["']image["']/i,
+      /<enclosure[^>]+url=["']([^"']+)["'][^>]*type=["']image\//i,
+      /<image[^>]*>\s*<url>([^<]+)<\/url>/i,
+      /<itunes:image[^>]+href=["']([^"']+)["']/i
     ];
-
     for (const pattern of patterns) {
       const match = xml.match(pattern);
       if (match?.[1]) return match[1];
@@ -235,30 +292,30 @@ export class RSSParser {
     return null;
   }
 
-  private async handleTechCrunchImage(articleUrl: string): Promise<string | undefined> {
+  private async handleTechCrunchImage(link: string, warnings?: string[]): Promise<string | undefined> {
+    warnings ??= [];
     try {
-      const html = await this.fetchArticleContent(articleUrl);
-      const jsonLd = this.extractJsonLd(html);
+      const html = await this.fetchArticleContent(link, warnings);
+      const jsonLd = this.extractJsonLd(html, warnings);
       if (jsonLd?.image?.url) {
-        return this.normalizeUrl(jsonLd.image.url, articleUrl);
+        return this.normalizeUrl(jsonLd.image.url, link);
       }
-
-      const image = this.extractMetaImage(html, articleUrl) || 
-                   this.extractFirstContentImage(html, articleUrl);
-      return image;
-    } catch (error) {
-      console.error(`TechCrunch image fetch failed:`, error);
+      const metaImage = this.extractMetaImage(html, link, warnings);
+      if (metaImage) return metaImage;
+      return this.extractFirstContentImage(html, link, warnings);
+    } catch (e) {
+      this.addWarning(warnings, `Error fetching TechCrunch article for image: ${(e as Error).message}`);
       return undefined;
     }
   }
 
-  private extractMetaImage(html: string, baseUrl: string): string | undefined {
+  private extractMetaImage(html: string, baseUrl: string, warnings: string[]): string | undefined {
+    warnings ??= [];
     const metaPatterns = [
       /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
       /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
       /<meta[^>]+itemprop=["']image["'][^>]+content=["']([^"']+)["']/i
     ];
-
     for (const pattern of metaPatterns) {
       const match = html.match(pattern);
       if (match?.[1]) return this.normalizeUrl(match[1], baseUrl);
@@ -266,67 +323,75 @@ export class RSSParser {
     return undefined;
   }
 
-  private extractFirstContentImage(html: string, baseUrl: string): string | undefined {
-    const imgPattern = /<img[^>]+src=["']([^"']+)["']/i;
-    const match = html.match(imgPattern);
+  private extractFirstContentImage(html: string, baseUrl: string, warnings: string[]): string | undefined {
+    warnings ??= [];
+    const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
     if (match?.[1] && this.isImageUrl(match[1])) {
       return this.normalizeUrl(match[1], baseUrl);
     }
     return undefined;
   }
 
-  private extractImageFromHtml(html: string, baseUrl: string): string | undefined {
-    return this.extractMetaImage(html, baseUrl) || 
-           this.extractFirstContentImage(html, baseUrl);
+  private extractImageFromHtml(html: string, baseUrl: string, warnings: string[]): string | undefined {
+    return this.extractMetaImage(html, baseUrl, warnings) || this.extractFirstContentImage(html, baseUrl, warnings);
   }
 
-  private extractFirstValidLink(itemXml: string): string {
-    const link = this.extractTag(itemXml, 'link')?.trim();
-    const guid = this.extractTag(itemXml, 'guid')?.trim();
-    
-    if (link && this.isValidUrl(link)) return link;
-    if (guid && this.isValidUrl(guid)) return guid;
-    return link || guid || '';
+  private extractFirstValidLink(entryXml: string, warnings?: string[]): string {
+    warnings ??= [];
+    const linkCandidates = [
+      this.extractTag(entryXml, 'link', warnings),
+      this.extractTag(entryXml, 'guid', warnings),
+      this.extractTag(entryXml, 'id', warnings)
+    ];
+
+    for (const candidate of linkCandidates) {
+      if (candidate && this.isValidUrl(candidate.trim())) {
+        return candidate.trim();
+      }
+    }
+    return '';
   }
 
-  private parseDate(itemXml: string): Date {
-    const dateStr = this.extractTag(itemXml, 'pubDate') || 
-                   this.extractTag(itemXml, 'published') || 
-                   this.extractTag(itemXml, 'dc:date') ||
-                   this.extractTag(itemXml, 'updated');
-    return dateStr ? this.safeDateParse(dateStr) : new Date();
+  private parseDate(entryXml: string, warnings?: string[]): Date {
+    warnings ??= [];
+    const dateStr = this.extractTag(entryXml, 'pubDate', warnings) ||
+                    this.extractTag(entryXml, 'published', warnings) ||
+                    this.extractTag(entryXml, 'dc:date', warnings) ||
+                    this.extractTag(entryXml, 'updated', warnings) ||
+                    '';
+    return dateStr ? this.safeDateParse(dateStr, warnings) : new Date();
   }
 
-  private safeDateParse(dateStr: string): Date {
-    try {
-      const date = new Date(dateStr.replace(/(\d{2}) (\w{3}) (\d{4})/, '$2 $1 $3'));
-      return isNaN(date.getTime()) ? new Date() : date;
-    } catch {
+  private safeDateParse(dateStr: string, warnings?: string[]): Date {
+    warnings ??= [];
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) {
+      this.addWarning(warnings, 'Invalid date format: ' + dateStr);
       return new Date();
     }
+    return date;
   }
 
-  private extractCategories(itemXml: string): string[] {
-    const categoryRegex = /<category[^>]*>([^<]+)<\/category>|<dc:subject>([^<]+)<\/dc:subject>/gi;
-    const categories = new Set<string>();
-    let categoryMatch;
-
-    while ((categoryMatch = categoryRegex.exec(itemXml)) !== null) {
-      const category = categoryMatch[1] || categoryMatch[2];
-      if (category) categories.add(this.cleanText(category));
+  private extractCategories(entryXml: string, warnings?: string[]): string[] {
+    warnings ??= [];
+    const categories: Set<string> = new Set();
+    const regexes = [
+      /<category[^>]*>([^<]+)<\/category>/gi,
+      /<dc:subject[^>]*>([^<]+)<\/dc:subject>/gi
+    ];
+    for (const regex of regexes) {
+      let match;
+      while ((match = regex.exec(entryXml)) !== null) {
+        categories.add(this.cleanText(match[1]));
+      }
     }
-
     return Array.from(categories);
   }
 
   private isImageUrl(url: string): boolean {
     try {
-      const parsed = new URL(url);
-      return this.imageExtensions.some(ext => 
-        parsed.pathname.toLowerCase().endsWith(ext) ||
-        parsed.pathname.toLowerCase().includes('.image') ||
-        parsed.pathname.toLowerCase().includes('/images/')
-      );
+      const parsed = new URL(url, 'http://dummy');
+      return this.imageExtensions.some(ext => parsed.pathname.toLowerCase().endsWith(ext));
     } catch {
       return false;
     }
@@ -343,7 +408,6 @@ export class RSSParser {
 
   private normalizeUrl(url: string, base?: string): string {
     if (!url || url.startsWith('data:')) return url;
-
     try {
       const normalized = new URL(url, base).toString()
         .split('?')[0]
@@ -355,7 +419,8 @@ export class RSSParser {
     }
   }
 
-  private extractTag(xml: string, tagName: string): string | null {
+  private extractTag(xml: string, tagName: string, warnings?: string[]): string | null {
+    warnings ??= [];
     const regex = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i');
     const match = xml.match(regex);
     return match ? this.cleanText(match[1]) : null;
@@ -369,13 +434,19 @@ export class RSSParser {
       .trim();
   }
 
-  private async fetchArticleContent(url: string): Promise<string> {
-    const response = await fetch(url, { 
-      headers: { 'User-Agent': this.userAgent },
-      signal: AbortSignal.timeout(5000)
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.text();
+  private async fetchArticleContent(url: string, warnings?: string[]): Promise<string> {
+    warnings ??= [];
+    try {
+      const response = await fetch(url, {
+        headers: { 'User-Agent': this.userAgent },
+        signal: AbortSignal.timeout(5000)
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.text();
+    } catch (e) {
+      this.addWarning(warnings, `Error fetching ${url}: ${(e as Error).message}`);
+      throw e;
+    }
   }
 
   public createArticleFromFeedItem(
@@ -384,7 +455,6 @@ export class RSSParser {
     sourceName: string,
     defaultCategory: string
   ): InsertArticle {
-    // Специальная обработка для Hacker News
     let content = item.fullContent || item.description;
     if (item.link.includes('news.ycombinator.com') && content === item.link) {
       content = `Discussion link: ${item.link}`;
@@ -406,9 +476,17 @@ export class RSSParser {
   private extractExcerpt(content: string, maxLength: number = 200): string {
     const text = this.cleanText(content);
     if (text.length <= maxLength) return text;
-    
     const truncated = text.substring(0, maxLength);
     const lastSpace = truncated.lastIndexOf(' ');
     return lastSpace > 0 ? truncated.substring(0, lastSpace) + '...' : truncated + '...';
   }
+
+
+private addWarning(warnings: string[] | undefined, message: string) {
+  if (!warnings) return;
+  if (!this.errorSet.has(message)) {
+    warnings.push(message);
+    this.errorSet.add(message);
+  }
+}
 }
