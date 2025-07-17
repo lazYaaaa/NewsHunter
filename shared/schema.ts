@@ -28,10 +28,10 @@ export const articles = pgTable("articles", {
   shares: integer("shares").notNull().default(0),
 });
 
-export const insertSourceSchema = createInsertSchema(sources).omit({
-  id: true,
-  lastFetched: true,
-  articleCount: true,
+export const insertSourceSchema = z.object({
+  name: z.string().min(1, "Введите название"),
+  url: z.string().url("Введите корректный URL"),
+  category: z.string().min(1, "Введите категорию"),
 });
 
 export const insertArticleSchema = createInsertSchema(articles).omit({
