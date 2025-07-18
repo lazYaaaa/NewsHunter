@@ -38,15 +38,12 @@ export class RSSParser {
       const entries = await this.parseXML(xmlText, isAtom, warnings);
 
       for (const entry of entries) {
-        if (entry.warning) {
-          warnings.push(entry.warning);
-        }
         if (entry.item) {
           items.push({ ...entry.item, sourceId, sourceName });
         }
       }
     } catch (e: any) {
-      this.addWarning(warnings, `Failed to parse feed from ${url}: ${e.message}`);
+      this.addWarning(warnings, `Не удалось разобрать RSS-ленту ${url}: ${e.message}`);
     }
     return { items, warnings };
   }
@@ -65,7 +62,7 @@ export class RSSParser {
       const location = response.headers.get('location');
       if (location) {
         const newUrl = new URL(location, url).toString();
-        this.addWarning(warnings, `Redirected from ${url} to ${newUrl}`);
+        this.addWarning(warnings, `Редирект с ${url} на ${newUrl}`);
         return this.fetchWithRedirects(newUrl, warnings, redirectCount + 1);
       }
     }
@@ -85,34 +82,35 @@ export class RSSParser {
     while ((match = regex.exec(xmlText)) !== null) {
       try {
         const entryXml = match[1];
-
-        // Перед вызовами проверяем warnings
-        warnings ??= [];
+        const entryPosition = `(позиция в XML: ${match.index}-${match.index + match[0].length})`;
 
         const linkCandidate = this.extractFirstValidLink(entryXml, warnings);
         const link = linkCandidate || this.extractTag(entryXml, 'link', warnings) || '';
 
-        if (!link || !this.isValidUrl(link)) {
-          this.addWarning(warnings, `Invalid or missing URL in entry`);
-          results.push({ item: null, warning: `Invalid or missing URL in entry` });
+        if (!link) {
+          const warningMsg = `Отсутствует URL в записи ${entryPosition}`;
+          this.addWarning(warnings, warningMsg);
+          results.push({ item: null, warning: warningMsg });
           continue;
         }
 
-        const isHackerNews = link.includes('hnrss.org') || this.extractTag(entryXml, 'link', warnings)?.includes('news.ycombinator');
-
-        const title = this.extractTag(entryXml, 'title', warnings) || 'Untitled';
-
-        let description = this.extractTag(entryXml, 'description', warnings) || this.extractTag(entryXml, 'content:encoded', warnings) || '';
-
-        if (isHackerNews) {
-          // Дополнительная обработка
+        if (!this.isValidUrl(link)) {
+          const warningMsg = `Некорректный URL в записи: "${link.substring(0, 50)}..." ${entryPosition}`;
+          this.addWarning(warnings, warningMsg);
+          results.push({ item: null, warning: warningMsg });
+          continue;
         }
 
-        if (description.includes('http://') || description.includes('https://')) {
-          // Есть ссылки в описании
-        }
+        const isHackerNews = link.includes('hnrss.org') || 
+                           this.extractTag(entryXml, 'link', warnings)?.includes('news.ycombinator');
 
-        const pubdateStr = this.extractTag(entryXml, 'pubDate', warnings) || this.extractTag(entryXml, 'published', warnings) || '';
+        const title = this.extractTag(entryXml, 'title', warnings) || 'Без названия';
+
+        let description = this.extractTag(entryXml, 'description', warnings) || 
+                        this.extractTag(entryXml, 'content:encoded', warnings) || '';
+
+        const pubdateStr = this.extractTag(entryXml, 'pubDate', warnings) || 
+                         this.extractTag(entryXml, 'published', warnings) || '';
         const pubdate = pubdateStr ? this.safeDateParse(pubdateStr, warnings) : new Date();
 
         const categories = this.extractCategories(entryXml, warnings);
@@ -129,7 +127,7 @@ export class RSSParser {
           try {
             item.image = await this.extractBestImage(entryXml, link, warnings);
           } catch (err) {
-            this.addWarning(warnings, `Error extracting image for ${link}: ${(err as Error).message}`);
+            this.addWarning(warnings, `Ошибка извлечения изображения для ${link}: ${(err as Error).message}`);
           }
         }
 
@@ -141,15 +139,16 @@ export class RSSParser {
               item.image = images[0];
             }
           } catch (err) {
-            this.addWarning(warnings, `Failed to fetch full content for ${link}: ${(err as Error).message}`);
+            this.addWarning(warnings, `Не удалось получить полный контент для ${link}: ${(err as Error).message}`);
           }
         }
 
         this.previousItemsCache[link] = item;
         results.push({ item });
       } catch (err: any) {
-        this.addWarning(warnings, `Error processing entry: ${(err as Error).message}`);
-        results.push({ item: null, warning: `Error processing entry` });
+        const errorMsg = `Ошибка обработки записи: ${(err as Error).message}`;
+        this.addWarning(warnings, errorMsg);
+        results.push({ item: null, warning: errorMsg });
       }
     }
     return results;
@@ -190,7 +189,7 @@ export class RSSParser {
       }
       return json;
     } catch (e) {
-      this.addWarning(warnings, 'Error parsing JSON-LD: ' + e);
+      this.addWarning(warnings, 'Ошибка разбора JSON-LD: ' + e);
       return null;
     }
   }
@@ -255,11 +254,11 @@ export class RSSParser {
           const html = await this.fetchArticleContent(link, warnings);
           return this.extractMetaImage(html, link, warnings) || this.extractFirstContentImage(html, link, warnings);
         } catch (err) {
-          this.addWarning(warnings, `Error fetching full page for image from ${link}: ${(err as Error).message}`);
+          this.addWarning(warnings, `Ошибка загрузки страницы для извлечения изображения из ${link}: ${(err as Error).message}`);
         }
       }
     } catch (e) {
-      this.addWarning(warnings, `Image extraction failed for ${link}: ${(e as Error).message}`);
+      this.addWarning(warnings, `Сбой извлечения изображения для ${link}: ${(e as Error).message}`);
     }
     return undefined;
   }
@@ -271,7 +270,7 @@ export class RSSParser {
         return `https://img.youtube.com/vi/${idMatch[1]}/maxresdefault.jpg`;
       }
     } catch (e) {
-      // Нет warnings здесь, потому что warnings не передается
+      return undefined;
     }
     return undefined;
   }
@@ -304,7 +303,7 @@ export class RSSParser {
       if (metaImage) return metaImage;
       return this.extractFirstContentImage(html, link, warnings);
     } catch (e) {
-      this.addWarning(warnings, `Error fetching TechCrunch article for image: ${(e as Error).message}`);
+      this.addWarning(warnings, `Ошибка получения изображения из TechCrunch: ${(e as Error).message}`);
       return undefined;
     }
   }
@@ -366,7 +365,7 @@ export class RSSParser {
     warnings ??= [];
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) {
-      this.addWarning(warnings, 'Invalid date format: ' + dateStr);
+      this.addWarning(warnings, 'Некорректный формат даты: ' + dateStr);
       return new Date();
     }
     return date;
@@ -444,7 +443,7 @@ export class RSSParser {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return await response.text();
     } catch (e) {
-      this.addWarning(warnings, `Error fetching ${url}: ${(e as Error).message}`);
+      this.addWarning(warnings, `Ошибка загрузки ${url}: ${(e as Error).message}`);
       throw e;
     }
   }
@@ -457,7 +456,7 @@ export class RSSParser {
   ): InsertArticle {
     let content = item.fullContent || item.description;
     if (item.link.includes('news.ycombinator.com') && content === item.link) {
-      content = `Discussion link: ${item.link}`;
+      content = `Ссылка на обсуждение: ${item.link}`;
     }
 
     return {
@@ -481,12 +480,11 @@ export class RSSParser {
     return lastSpace > 0 ? truncated.substring(0, lastSpace) + '...' : truncated + '...';
   }
 
-
-private addWarning(warnings: string[] | undefined, message: string) {
-  if (!warnings) return;
-  if (!this.errorSet.has(message)) {
-    warnings.push(message);
-    this.errorSet.add(message);
+  private addWarning(warnings: string[] | undefined, message: string) {
+    if (!warnings) return;
+    if (!this.errorSet.has(message)) {
+      warnings.push(message);
+      this.errorSet.add(message);
+    }
   }
-}
 }
