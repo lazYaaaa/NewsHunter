@@ -478,6 +478,124 @@ app.delete('/api/sources/:id', async (req: Request, res: Response) => {
   }
 });
 
+// --- Лайки ---
+app.post('/api/articles/:id/like', async (req: Request, res: Response) => {
+  const articleId = parseInt(req.params.id);
+  try {
+    await storage.incrementLikes(articleId);
+    res.json({ message: 'Лайк добавлен' });
+  } catch (error) {
+    console.error('Ошибка при ставке лайка:', error);
+    res.status(500).json({ error: 'Не удалось поставить лайк' });
+  }
+});
+
+app.post('/api/articles/:id/dislike', async (req: Request, res: Response) => {
+  const articleId = parseInt(req.params.id);
+  try {
+    await storage.decrementLikes(articleId);
+    res.json({ message: 'Лайк убран' });
+  } catch (error) {
+    console.error('Ошибка при убирании лайка:', error);
+    res.status(500).json({ error: 'Не удалось убрать лайк' });
+  }
+});
+
+// --- Комментарии ---
+
+// Получить комментарии статьи
+app.get('/api/articles/:id/comments', async (req: Request, res: Response) => {
+  const articleId = parseInt(req.params.id);
+  try {
+    const comments = await storage.getCommentsByArticleId(articleId);
+    res.json(comments);
+  } catch (error) {
+    console.error('Ошибка при получении комментариев:', error);
+    res.status(500).json({ error: 'Не удалось получить комментарии' });
+  }
+});
+
+// Добавить комментарий
+app.post('/api/articles/:id/comments', async (req: Request, res: Response) => {
+  const articleId = parseInt(req.params.id);
+  const authReq = req as AuthenticatedRequest;
+
+  if (!authReq.user) {
+    return res.status(401).json({ error: 'Требуется авторизация' });
+  }
+
+  const { content } = req.body;
+  if (!content || typeof content !== 'string') {
+    return res.status(400).json({ error: 'Некорректный контент' });
+  }
+
+  try {
+    const comment = await storage.createComment({
+      articleId,
+      authorId: authReq.user.id,
+      content,
+    });
+    // Обновляем счетчик комментариев
+    const currentArticle = await storage.getArticleById(articleId);
+    if (currentArticle) {
+      await storage.updateCommentsCount(articleId, currentArticle.comments + 1);
+    }
+    res.status(201).json(comment);
+  } catch (error) {
+    console.error('Ошибка при добавлении комментария:', error);
+    res.status(500).json({ error: 'Не удалось добавить комментарий' });
+  }
+});
+
+// Удалить комментарий
+app.delete('/api/comments/:id', async (req: Request, res: Response) => {
+  const commentId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+
+  try {
+    // Проверяем, что комментарий принадлежит текущему пользователю
+    const comments = await storage.getCommentsByArticleId(0); // Временно, чтобы проверить
+    const comment = comments.find(c => c.id === commentId);
+    if (!comment) {
+      return res.status(404).json({ error: 'Комментарий не найден' });
+    }
+    if (comment.authorId !== authReq.user?.id) {
+      return res.status(403).json({ error: 'Нет прав для удаления этого комментария' });
+    }
+    const success = await storage.deleteComment(commentId);
+    if (success) {
+      // Обновляем счетчик комментариев
+      const article = await storage.getArticleById(comment.articleId);
+      if (article) {
+        await storage.updateCommentsCount(comment.articleId, article.comments - 1);
+      }
+      res.json({ message: 'Комментарий удален' });
+    } else {
+      res.status(500).json({ error: 'Не удалось удалить комментарий' });
+    }
+  } catch (error) {
+    console.error('Ошибка при удалении комментария:', error);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+app.get('/api/articles/:id/stats', async (req: Request, res: Response) => {
+  const articleId = parseInt(req.params.id);
+  try {
+    const article = await storage.getArticleById(articleId);
+    if (!article) {
+      return res.status(404).json({ error: 'Статья не найдена' });
+    }
+    // Предполагается, что у вас есть свойства views, likes, commentsCount
+    // Или, если нет, то получайте их из БД
+    const likes = await storage.getArticleLikesCount(articleId);
+    const commentsCount = await storage.getCommentsCount(articleId);
+    res.json({ likes, commentsCount });
+  } catch (error) {
+    console.error('Ошибка получения статистики статей:', error);
+    res.status(500).json({ error: 'Не удалось получить статистику' });
+  }
+});
+
   // 10. 404 handler должен быть последним
   app.all('/api/*', (req: Request, res: Response) => {
     res.status(404).json({ error: 'API endpoint not found' });

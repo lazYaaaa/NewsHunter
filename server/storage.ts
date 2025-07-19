@@ -1,6 +1,8 @@
 import * as schema from '../shared/schema';
 import { db } from "./db";
 import { eq, desc, and, or, like, count, gt } from "drizzle-orm";
+import { v4 as uuidv4 } from 'uuid';
+import { sql } from "drizzle-orm";
 
 export class DatabaseStorage implements schema.IStorage {
   // Пользователи
@@ -8,7 +10,15 @@ export class DatabaseStorage implements schema.IStorage {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, id));
     return user;
   }
+  async getArticleLikesCount(articleId: number): Promise<number> {
+    const article = await this.getArticleById(articleId);
+    return article?.likes ?? 0;
+  }
 
+  async getCommentsCount(articleId: number): Promise<number> {
+    const comments = await this.getCommentsByArticleId(articleId);
+    return comments.length;
+  }
   async upsertUser(userData: schema.UpsertUser): Promise<schema.User> {
     const [user] = await db
       .insert(schema.users)
@@ -136,6 +146,62 @@ export class DatabaseStorage implements schema.IStorage {
       .from(schema.articles)
       .groupBy(schema.articles.category);
     return result.map(r => ({ name: r.name, count: r.count }));
+  }
+
+  // --- Методы для комментариев ---
+
+  // Получение комментариев по статье
+  async getCommentsByArticleId(articleId: number): Promise<schema.Comment[]> {
+    return await db.select().from(schema.comments).where(eq(schema.comments.articleId, articleId)).orderBy(desc(schema.comments.createdAt));
+  }
+
+  // Создание комментария
+  async createComment(comment: { articleId: number; authorId: string; content: string }): Promise<schema.Comment> {
+    const newComment = {
+      id: uuidv4(),
+      articleId: comment.articleId,
+      authorId: comment.authorId,
+      content: comment.content,
+      createdAt: new Date(),
+    };
+    const [created] = await db.insert(schema.comments).values(newComment).returning();
+    return created;
+  }
+
+  // Удаление комментария
+  async deleteComment(id: string): Promise<boolean> {
+    const result = await db.delete(schema.comments).where(eq(schema.comments.id, id));
+    return (result.rowCount || 0) > 0;
+  }
+
+  // --- Методы для лайков ---
+
+  // Увеличение лайков
+  async incrementLikes(articleId: number): Promise<void> {
+    await db
+      .update(schema.articles)
+      .set({ likes: sql`${schema.articles.likes} + 1` })
+      .where(eq(schema.articles.id, articleId));
+    // После обновления также обновляем счетчик комментариев
+    await this.updateCommentsCount(articleId, (await this.getArticleById(articleId))?.comments || 0);
+  }
+
+  // Уменьшение лайков
+  async decrementLikes(articleId: number): Promise<void> {
+    await db
+      .update(schema.articles)
+      .set({ likes: sql`${schema.articles.likes} - 1` })
+      .where(eq(schema.articles.id, articleId));
+    // После обновления также обновляем счетчик комментариев
+    await this.updateCommentsCount(articleId, (await this.getArticleById(articleId))?.comments || 0);
+  }
+
+  // Обновление количества комментариев (если нужно)
+  async updateCommentsCount(articleId: number, count: number): Promise<void> {
+    await db
+      .update(schema.articles)
+      .set({ comments: count })
+      .where(eq(schema.articles.id, articleId));
   }
 }
 

@@ -11,9 +11,11 @@ import Register from './pages/Register.tsx';
 import Profile from './pages/Profile.tsx';
 import { ThemeProvider } from './context/context.tsx';
 import { UserProvider } from './context/UserContext.tsx';
+import ErrorBoundary from './context/ErrorBoundary.tsx';
 
 function App() {
   return (
+    <ErrorBoundary>
     <ThemeProvider>
       <UserProvider>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-300">
@@ -42,6 +44,7 @@ function App() {
       </div>
       </UserProvider>
     </ThemeProvider>
+    </ErrorBoundary>
   );
 }
 
