@@ -141,7 +141,7 @@ export const ArticleCard: React.FC<Article> = ({
         const addedComment: Comment = await res.json();
         setComments(prev => [addedComment, ...prev]);
         await fetchStats();
-        setCommentsCount(prev => prev + 1);
+        //setCommentsCount(prev => prev + 1);
         setNewComment('');
       }
     } catch (err) {
