@@ -5,6 +5,35 @@ import { v4 as uuidv4 } from 'uuid';
 import { sql } from "drizzle-orm";
 
 export class DatabaseStorage implements schema.IStorage {
+  async likeArticle(userId: string, articleId: number): Promise<void> {
+    await db.insert(schema.articleLikes).values({
+    userId,
+    articleId,
+  });
+  }
+  async dislikeArticle(userId: string, articleId: number): Promise<void> {
+  await db
+    .delete(schema.articleLikes)
+    .where(
+      and(
+        eq(schema.articleLikes.userId, userId),
+        eq(schema.articleLikes.articleId, articleId)
+      )
+    );
+}
+  async checkUserLikedArticle(userId: string, articleId: number): Promise<boolean> {
+
+  const result = await db
+    .select()
+    .from(schema.articleLikes) // или 'article_likes'
+    .where(and(
+      eq(schema.articleLikes.userId, userId),
+      eq(schema.articleLikes.articleId, articleId)
+    ))
+    .limit(1);
+  return result.length > 0;
+}
+
   // Пользователи
   async getUser(id: string): Promise<schema.User | undefined> {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, id));

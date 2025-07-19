@@ -64,7 +64,19 @@ export const ArticleCard: React.FC<Article> = ({
 
   useEffect(() => {
     fetchStats();
-  }, [id]);
+    if (user) {
+    fetch(`/api/articles/${id}/liked`, {
+      credentials: 'include',
+    })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data && typeof data.liked === 'boolean') {
+          setLiked(data.liked);
+        }
+      })
+      .catch(console.error);
+  }
+  }, [id, user]);
 
   const handleLikeToggle = async (e: React.MouseEvent) => {
     e.preventDefault();

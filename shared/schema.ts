@@ -44,6 +44,7 @@ export const insertArticleSchema = createInsertSchema(articles).omit({
   likes: true,
 });
 
+
 // Типы на основе схем
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -52,6 +53,8 @@ export type Source = typeof sources.$inferSelect;
 export type InsertSource = z.infer<typeof insertSourceSchema>;
 export type Article = typeof articles.$inferSelect;
 export type InsertArticle = z.infer<typeof insertArticleSchema>;
+export type ArticleLike = typeof articleLikes.$inferSelect;       // Получение данных
+export type NewArticleLike = typeof articleLikes.$inferInsert; 
 
 // Таблица пользователей
 export const users = pgTable("users", {
@@ -86,6 +89,16 @@ export type Comment = {
   content: string;
   createdAt: Date | null;
 };
+export const articleLikes = pgTable('article_likes', {
+  id: serial('id').primaryKey(),
+  userId: varchar('userId', { length: 36 }),
+  articleId: integer('articleId'),
+  likedAt: timestamp('likedAt').defaultNow(),
+});
+export const insertArticleLikeSchema = createInsertSchema(articleLikes).omit({
+  id: true,
+  likedAt: true,
+});
 
 // Интерфейс для хранения
 export interface IStorage {
@@ -135,4 +148,7 @@ export interface IStorage {
 
   getArticleLikesCount(articleId: number): Promise<number>;
   getCommentsCount(articleId: number): Promise<number>;
+  checkUserLikedArticle(userId: string, articleId:number) : Promise<boolean>;
+  likeArticle(userId: string, articleId: number): Promise<void>;
+  dislikeArticle(userId: string, articleId: number): Promise<void>;
 }

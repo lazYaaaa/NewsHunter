@@ -481,23 +481,76 @@ app.delete('/api/sources/:id', async (req: Request, res: Response) => {
 // --- Лайки ---
 app.post('/api/articles/:id/like', async (req: Request, res: Response) => {
   const articleId = parseInt(req.params.id);
+  const authReq = req as AuthenticatedRequest;
+
+  if (!authReq.user) {
+    return res.status(401).json({ error: 'Требуется авторизация' });
+  }
+
   try {
+    const userId = authReq.user.id;
+
+    // Проверка, есть ли уже лайк у этого пользователя
+    const liked = await storage.checkUserLikedArticle(userId, articleId);
+    if (liked) {
+      return res.status(400).json({ error: 'Вы уже поставили лайк этой статье' });
+    }
+
+    // Вставка лайка через ваш метод
+    await storage.likeArticle(userId, articleId);
+
+    // Обновление счетчика лайков
     await storage.incrementLikes(articleId);
-    res.json({ message: 'Лайк добавлен' });
+
+    res.json({ message: 'Лайк поставлен' });
   } catch (error) {
-    console.error('Ошибка при ставке лайка:', error);
+    console.error('Ошибка при постановке лайка:', error);
     res.status(500).json({ error: 'Не удалось поставить лайк' });
   }
 });
 
 app.post('/api/articles/:id/dislike', async (req: Request, res: Response) => {
   const articleId = parseInt(req.params.id);
+  const authReq = req as AuthenticatedRequest;
+
+  if (!authReq.user) {
+    return res.status(401).json({ error: 'Требуется авторизация' });
+  }
+
   try {
+    const userId = authReq.user.id;
+
+    // Проверяем, есть ли лайк у этого пользователя для этой статьи
+    const liked = await storage.checkUserLikedArticle(userId, articleId);
+    if (!liked) {
+      return res.status(400).json({ error: 'Лайк не найден' });
+    }
+
+    // Удаляем лайк
+    await storage.dislikeArticle(userId, articleId);
+
+    // Уменьшаем счетчик лайков у статьи
     await storage.decrementLikes(articleId);
+
     res.json({ message: 'Лайк убран' });
   } catch (error) {
     console.error('Ошибка при убирании лайка:', error);
     res.status(500).json({ error: 'Не удалось убрать лайк' });
+  }
+});
+app.get('/api/articles/:id/liked', isLocalAuthenticated, async (req: AuthenticatedRequest, res: Response) => {
+   if (!req.user) {
+    return res.status(401).json({ error: 'Не аутентифицирован' });
+  }
+  const articleId = parseInt(req.params.id, 10);
+  const userId = req.user.id;
+
+  try {
+    const liked = await storage.checkUserLikedArticle(userId, articleId);
+    res.json({ liked });
+  } catch (err) {
+    console.error('Ошибка при проверке лайка:', err);
+    res.status(500).json({ error: 'Ошибка сервера' });
   }
 });
 
@@ -593,6 +646,22 @@ app.get('/api/articles/:id/stats', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Ошибка получения статистики статей:', error);
     res.status(500).json({ error: 'Не удалось получить статистику' });
+  }
+});
+app.get('/api/articles/:id/liked', isLocalAuthenticated, async (req: Request, res: Response) => {
+  const articleId = parseInt(req.params.id);
+  const authReq = req as AuthenticatedRequest;
+
+  if (!authReq.user) {
+    return res.status(401).json({ error: 'Не авторизован' });
+  }
+
+  try {
+    const liked = await storage.checkUserLikedArticle(authReq.user.id, articleId);
+    res.json({ liked });
+  } catch (error) {
+    console.error('Ошибка при проверке лайка пользователя:', error);
+    res.status(500).json({ error: 'Не удалось проверить статус лайка' });
   }
 });
 
